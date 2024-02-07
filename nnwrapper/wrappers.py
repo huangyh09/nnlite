@@ -7,8 +7,21 @@ from sklearn.metrics import roc_auc_score
 from sklearn.metrics import confusion_matrix
 
 class NNWrapper():
-    def __init__(self, model, criterion, optimizer):
-        self.model = model
+    def __init__(self, model, criterion, optimizer, device='cpu'):
+        """
+        Parameters
+        ----------
+        model: torch.nn.Module
+            The model to use / train
+        criterion: criterion in torch.nn
+            E.g., torch.nn.CrossEntropyLoss()
+        optimizer: optimizer in torch.optim
+            E.g., torch.optim.SGD(model.parameters(), lr=0.003, momentum=0.8)
+        device: str
+            To set the device for CPU or GPU, e.g., 'cuda:0'
+        """
+        self.model = model.to(torch.device(device))
+        self.device = device
         self.criterion = criterion
         self.optimizer = optimizer
         
@@ -17,6 +30,9 @@ class NNWrapper():
         train_loss = 0
         for data, label in train_loader:
             # data, label = data.cuda(), label.cuda()
+            data = data.to(torch.device(self.device))
+            label = label.to(torch.device(self.device))
+            
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, label)
@@ -34,6 +50,9 @@ class NNWrapper():
         with torch.no_grad():
             for data, label in test_loader:
                 # data, label = data.cuda(), label.cuda()
+                data = data.to(torch.device(self.device))
+                label = label.to(torch.device(self.device))
+            
                 output = self.model(data)
                 y_outputs.append(output)
                 
