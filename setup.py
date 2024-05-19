@@ -15,7 +15,8 @@ reqs = [
     'matplotlib', 
     'pandas',
     'scikit-learn',
-    'torch'
+    'torch',
+    'tqdm'
 ]
 
 here = path.abspath(path.dirname(__file__))

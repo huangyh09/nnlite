@@ -28,10 +28,14 @@ class NNWrapper():
     def train(self, train_loader, verbose=False):
         self.model.train()
         train_loss = 0
-        for data, label in train_loader:
-            # data, label = data.cuda(), label.cuda()
-            data = data.to(torch.device(self.device))
-            label = label.to(torch.device(self.device))
+        for sample in train_loader:
+            if len(sample) == 1:
+                data = sample[0].to(torch.device(self.device))
+                label = data
+            else:
+                data, label = sample
+                data = data.to(torch.device(self.device))
+                label = label.to(torch.device(self.device))
             
             self.optimizer.zero_grad()
             output = self.model(data)
@@ -43,20 +47,24 @@ class NNWrapper():
         train_loss = train_loss / len(train_loader.dataset)
         return train_loss
     
-    def predict(self, test_loader):
+    def predict(self, test_loader, compute_loss=False):
         self.model.eval()
         y_outputs = []
         test_loss = 0
         with torch.no_grad():
-            for data, label in test_loader:
-                # data, label = data.cuda(), label.cuda()
-                data = data.to(torch.device(self.device))
-                label = label.to(torch.device(self.device))
-            
+            for sample in test_loader:
+                if len(sample) == 1:
+                    data = sample[0].to(torch.device(self.device))
+                    label = data
+                else:
+                    data, label = sample
+                    data = data.to(torch.device(self.device))
+                    label = label.to(torch.device(self.device))
+                
                 output = self.model(data)
                 y_outputs.append(output)
                 
-                if label is not None:
+                if compute_loss:
                     loss = self.criterion(output, label)
                     test_loss += loss.item() * data.size(0)
         
@@ -71,22 +79,24 @@ class NNWrapper():
             self.train_losses[i] = self.train(train_loader, verbose=verbose)
             
             if validation_loader is not None:
-                _y_pred, self.valid_losses[i] = self.predict(validation_loader)
+                _y_pred, self.valid_losses[i] = self.predict(
+                    validation_loader, compute_loss=True
+                )
             
             if verbose:
                 print('Loss - Epoch: %s \tTraining: %.6f \tValidation: %.6f\n'
                       %(i, self.train_losses[i], self.valid_losses[i]))
     
-    def evaluate(self, y_scores, y_obs, mode='classification'):
-        """Under development
-        """
-        y_preds  = torch.argmax(y_scores, 1).cpu().data.numpy()
-        y_scores = y_scores[:, 1].cpu().data.numpy() 
-        y_obs    = y_obs[:, 1].cpu().data.numpy()
-        
-        acc = np.sum(y_preds == y_obs) / len(y_preds)
-        auc = roc_auc_score(y_obs, y_scores)
-        confu = confusion_matrix(y_obs, y_preds)
-        
-        return acc, auc, confu
+
+def evaluate(y_scores, y_obs, mode='classification'):
+    """Under development
+    """
+    y_preds  = torch.argmax(y_scores, 1).cpu().data.numpy()
+    y_scores = y_scores[:, 1].cpu().data.numpy() 
+    y_obs    = y_obs[:, 1].cpu().data.numpy()
     
+    acc = np.sum(y_preds == y_obs) / len(y_preds)
+    auc = roc_auc_score(y_obs, y_scores)
+    confu = confusion_matrix(y_obs, y_preds)
+    
+    return acc, auc, confu
