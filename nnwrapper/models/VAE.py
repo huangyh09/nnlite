@@ -1,9 +1,10 @@
+# Variational Auto-Encoder with flexible hidden layers
+
 # Adapted from tutorial examples:
 # https://medium.com/@rekalantar/dce2d2fe0f5f
 # https://github.com/pytorch/examples/blob/main/vae/main.py (PyTorch default)
 # https://towardsdatascience.com/3a06bee395ed (with pytorch-lightiing)
 
-# TODO: to test the pbmc_3k data (pre-processed h5ad data to be included here)
 
 import math
 import torch
@@ -42,62 +43,9 @@ class AE_base(nn.Module):
         # criterion
         self.criterion = nn.MSELoss()
     
-    # def criterion(self, input, target, fc_loss=nn.MSELoss()):
-    #     # _loss = torch.mean(torch.square(input - target))
-    #     _loss = fc_loss(input, target)
-    #     return _loss
-        
     def forward(self, x):
         x_pred = self.decoder(self.encoder(x))
         return x_pred
-
-
-def loss_VAE_Gaussian(x, x_hat, x_logstd, z_mean, z_logstd, beta=1.0, 
-    prior_mu=0.0, prior_sigma=1.0):
-    """
-    VAE loss with Gaussian noise model
-    Note, this will be in a batch format
-    Eq. 10 & Appendix B in VAE paper: https://arxiv.org/abs/1312.6114
-
-    Issue 1: lr
-    -----------
-    By using torch.mean(torch.sum(..., dim=-1)) instead of torch.mean(...), 
-    the gradient is x_dim (or z_dim) larger, so it requires to use smaller 
-    learning rate, e.g., lr=1e-3
-
-    Issue 2: beta
-    -------------
-    The prior might be too strong, depending on x_dim and z_dim. It may help
-    to use a smaller beta, e.g., 1e-2, or set a broader prior, e.g., 
-    prior_sigma = 3.0
-    """
-    # TODO: somehow when beta>1e-3, the model doesn't converge well.
-    def gaussian_loglik(x, x_hat, x_logstd):
-        _loglik = (-0.5 * torch.square((x_hat - x) / torch.exp(x_logstd)) - 
-                   x_logstd * math.log(math.sqrt(2 * math.pi)))
-
-        return torch.mean(torch.sum(_loglik, dim=-1))
-
-    def kl_divergence(z_mean, z_logstd, prior_mu=0.0, prior_sigma=1.0):
-        """
-        Analytical KL divergence for Gaussian:
-        https://en.wikipedia.org/wiki/Normal_distribution#Other_properties
-        """
-        mu1, var1 = z_mean, torch.square(torch.exp(z_logstd))
-        mu2, var2 = prior_mu, prior_sigma**2
-        _kl = (torch.square(mu1 - mu2) / (2 * var2) + 
-               0.5 * (var1 / var2 - 1 - 2 * z_logstd + math.log(var2)))
-
-        ## for prior as N(0, 1), it can be simplified:
-        # _kl = 0.5 * (torch.square(z_mean) + torch.square(torch.exp(z_logstd)) 
-        #              -1 - 2 * z_logstd)
-        
-        return torch.mean(torch.sum(_kl, dim=-1))
-
-    loglik = gaussian_loglik(x, x_hat, x_logstd)
-    kl = kl_divergence(z_mean, z_logstd, prior_mu, prior_sigma)
-
-    return -(loglik - beta * kl)
 
 
 class VAE_base(nn.Module):
@@ -113,6 +61,8 @@ class VAE_base(nn.Module):
         3) a matrix of variance as amoritized over z, but it can be unstable
         Here, we choose option 2) via fc_x_logstd() for better stabilization.
         We also use torch.clamp to clip the very small values.
+        Now, we also leave this choice as an argument of the loss function,
+        including option 0) with a predefined value 1, like MSE loss.
 
         Parameters
         ----------
@@ -151,9 +101,10 @@ class VAE_base(nn.Module):
 
         # reconstruction mean and diagonal variance (likelihood)
         self.fc_x_mean = nn.Linear(decode_dim, x_dim)
-        self.fc_x_logstd = nn.Linear(1, x_dim, bias=False) #(1, x_dim)
+        self.fc_x_logstd = nn.Linear(1, x_dim, bias=False) #(1, 1)
     
     def encode(self, x):
+        """For variational posterior distribution"""
         _x = self.encoder(x)
         z_mean, z_logstd = self.fc_z_mean(_x), self.fc_z_logstd(_x)
         return z_mean, z_logstd
@@ -164,9 +115,10 @@ class VAE_base(nn.Module):
         return z
 
     def decode(self, z):
+        """For exact posterior by reconstruction-based likelihood"""
         _z = self.decoder(z)
         x_mean = self.fc_x_mean(_z)
-        x_logstd = self.fc_x_logstd(torch.ones(1).to(self.device)).reshape((1, -1))
+        x_logstd = self.fc_x_logstd(torch.ones(1, 1).to(self.device))
         x_logstd = torch.clamp(x_logstd, min=-2, max=5)
         return x_mean, x_logstd
 
@@ -176,12 +128,53 @@ class VAE_base(nn.Module):
         x_hat, x_logstd = self.decode(z)
         return x_hat, x_logstd, z, z_mean, z_logstd
 
-    def criterion(self, input, target, fc_loss=None, beta=1.0, 
-        prior_mu=0, prior_sigma=1.0):
-        if fc_loss is None:
-            fc_loss = partial(loss_VAE_Gaussian, 
-                beta=beta, prior_mu=prior_mu, prior_sigma=prior_sigma)
 
-        x_hat, x_logstd, z, z_mean, z_logstd = input
-        _loss = fc_loss(target, x_hat, x_logstd, z_mean, z_logstd)
-        return _loss
+def loss_VAE_Gaussian(result, target, fix_x_var=False, beta=1.0, 
+    prior_mu=0.0, prior_sigma=1.0):
+    """
+    VAE loss with Gaussian noise model
+    Note, this will be in a batch format
+    Eq. 10 & Appendix B in VAE paper: https://arxiv.org/abs/1312.6114
+
+    Issue 1: lr
+    -----------
+    By using torch.mean(torch.sum(..., dim=-1)) instead of torch.mean(...), 
+    the gradient is x_dim (or z_dim) times larger, so it requires to use 
+    smaller learning rate, e.g., lr=1e-3
+
+    Issue 2: beta
+    -------------
+    The prior might be too strong, depending on x_dim and z_dim. It may help
+    to use a smaller beta, e.g., 1e-2, or set a broader prior, e.g., 
+    prior_sigma = 3.0
+
+    Issue 3: x_logstd
+    -----------------
+    The variance of x for defining likelihood. See the three (+1) options in
+    the VAE model. We can fix this variance by setting fix_x_var=True
+    """
+    # TODO: somehow when beta>1e-3, the model doesn't converge well.
+    def gaussian_loglik(x, x_hat, x_logstd):
+        _loglik = (-0.5 * torch.square((x_hat - x) / torch.exp(x_logstd)) - 
+                   x_logstd * math.log(math.sqrt(2 * math.pi)))
+        return torch.mean(torch.sum(_loglik, dim=-1))
+
+    def kl_divergence(z_mean, z_logstd, prior_mu=0.0, prior_sigma=1.0):
+        """
+        Analytical KL divergence for Gaussian:
+        https://en.wikipedia.org/wiki/Normal_distribution#Other_properties
+        """
+        mu1, var1 = z_mean, torch.square(torch.exp(z_logstd))
+        mu2, var2 = prior_mu, prior_sigma**2
+        _kl = (torch.square(mu1 - mu2) / (2 * var2) + 
+               0.5 * (var1 / var2 - 1 - 2 * z_logstd + math.log(var2)))
+        return torch.mean(torch.sum(_kl, dim=-1))
+
+    x_hat, x_logstd, z, z_mean, z_logstd = result
+    if fix_x_var:
+        x_logstd = x_logstd * 0 #torch.zeros(1, 1)#.to(self.device)
+
+    # Calculate loss
+    loglik = gaussian_loglik(target, x_hat, x_logstd)
+    kl = kl_divergence(z_mean, z_logstd, prior_mu, prior_sigma)
+    return -(loglik - beta * kl)
