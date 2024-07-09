@@ -129,7 +129,7 @@ class VAE_base(nn.Module):
         return x_hat, x_logstd, z, z_mean, z_logstd
 
 
-def loss_VAE_Gaussian(result, target, fix_x_var=False, beta=1.0, 
+def Loss_VAE_Gaussian(result, target, fix_x_var=False, beta=1.0, 
     prior_mu=0.0, prior_sigma=1.0):
     """
     VAE loss with Gaussian noise model
