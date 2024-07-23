@@ -1,21 +1,22 @@
-# Amoritized variational inference for Latent Dirichlet Allocation model
+# Amortized variational inference for Latent Dirichlet Allocation model
 # Paper: https://www.jmlr.org/papers/volume3/blei03a/blei03a.pdf
+# Wiki: https://en.wikipedia.org/wiki/Topic_model#Algorithms
 
 import math
 import torch
 import torch.nn as nn
 from functools import partial
+from .stats import negabin_loglik, gaussian_kl
 
-# NOTE: still draft prototype
 class nnLDA(nn.Module):
     def __init__(self, x_dim, z_dim, hidden_dims=[], fit_xscale=True, 
         device='cpu', fc_activate=torch.nn.ReLU()):
         """
-        Variational auto-encoder base model:
+        NeuralNet variational inference for Latent Dirichlet Allocation model.
         An implementation supporting customized hidden layers via a list.
 
         For the likelihood, the original Dirichlet-multinomial likelihood
-        will be replaced (approximated) by negative-binomial likelhood.
+        will be replaced (approximated) by negative-binomial likelihood.
 
         Parameters
         ----------
@@ -46,7 +47,7 @@ class nnLDA(nn.Module):
         self.fc_z_logstd = nn.Linear(encode_dim, z_dim)
         
         # decoder (inherited from VAE style) as parameters
-        self.W = nn.parameter.Parameter(torch.zeros(decode_dim, x_dim))
+        self.W = nn.parameter.Parameter(torch.zeros(z_dim, x_dim))
         self.offsets = nn.parameter.Parameter(torch.zeros(1, x_dim))
         self.log_phi = nn.parameter.Parameter(torch.zeros(1, x_dim))
         # self.log_phi = torch.zeros(1, x_dim).to(self.device)
@@ -61,51 +62,39 @@ class nnLDA(nn.Module):
         z = z_mean + torch.exp(z_logstd) * epsilon
         return z
 
-    def forward(self, x, lib_size):
+    def forward(self, x):
         z_mean, z_logstd = self.encode(x)
         z = self.reparameterization(z_mean, z_logstd)
-        H = nn.Softmax(z, dim=-1)
-        W = nn.Softmax(self.W + self.offsets, dim=-1)
+        H = torch.nn.functional.softmax(z, dim=-1)
+        W = torch.nn.functional.softmax(self.W + self.offsets, dim=-1)
         
-        x_hat = H @ W * lib_size
-        return x_hat, self.log_phi, z, z_mean, z_logstd
+        x_prop = H @ W
+        return x_prop, self.log_phi, z, z_mean, z_logstd
 
 
-def Loss_nnLDA_NB(result, target, beta=1.0, fix_phi_log=True):
-    def negabin_loglik(x, x_hat, log_phi):
-        """negative binomial approximates Dirichlet-multinomial
-        (https://en.wikipedia.org/wiki/Dirichlet-multinomial_distribution#
-        Related_distributions)
-
-        Parameters
-        ----------
-        x: observed n_failure
-        x_hat: expected n_failure
-        log_phi: log scale of over dispersion
-        """
-        from torch.special import gammaln
-        phi = torch.exp(log_phi)     # over-dispersion
-        var = x_hat + phi * x_hat**2 # variance
-        n = 1 / phi                  # n_success, i.e., concentration
-        p = n / (x_hat + n)          # probability of success
-        log_p = -log_phi - torch.log(x_hat + n)
-        log_q = torch.log(x_hat) - torch.log(x_hat + n)
-        _loglik = (gammaln(x + n)  - gammaln(x + 1) - gammaln(n) +
-                   n * log_p + x * log_q)
-        return torch.mean(torch.sum(_loglik, dim=-1))
-    def kl_divergence(z_mean, z_logstd, prior_mu=0.0, prior_sigma=1.0):
-        """logit-normal distribution
-        Not implemented yet, requiring Monte Carlo or heuristic approximation
-        https://en.wikipedia.org/wiki/Logit-normal_distribution#Moments
-        """
-        return 0
-
+def Loss_nnLDA_NB(result, target, lib_size=None, beta=1.0, fix_phi_log=-1.0):
+    """
+    Negative binomial approximates Dirichlet-multinomial
+    (https://en.wikipedia.org/wiki/Dirichlet-multinomial_distribution#
+    Related_distributions)
+    """
     # Parse input
-    x_hat, log_phi, z, z_mean, z_logstd = result
-    if fix_x_var:
-        log_phi = log_phi * 0 - 1.0
+    x_prop, log_phi, z, z_mean, z_logstd = result
+    x_target = target
+    if lib_size is None:
+        lib_size = torch.sum(x_target, dim=-1, keepdim=True)
+    x_hat = x_prop * lib_size
+
+    # Check if using a fixed phi or the learned phi
+    if fix_phi_log is False:
+        pass
+    elif fix_phi_log is True:
+        log_phi = log_phi * 0 - 1
+    else:
+        log_phi = log_phi * 0 + float(fix_phi_log)
 
     # Calculate loss
-    loglik = negabin_loglik(target, x_hat, log_phi)
-    kl = kl_divergence(z_mean, z_logstd, prior_mu, prior_sigma)
+    loglik = negabin_loglik(x_target, x_hat, log_phi)
+    kl = gaussian_kl(z_mean, z_logstd)
+
     return -(loglik - beta * kl)

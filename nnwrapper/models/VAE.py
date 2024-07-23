@@ -10,6 +10,7 @@ import math
 import torch
 import torch.nn as nn
 from functools import partial
+from .stats import gaussian_loglik, gaussian_kl
 
 class AE_base(nn.Module):
     def __init__(self, dim_x, dim_z, hidden_dims=[], 
@@ -154,27 +155,11 @@ def Loss_VAE_Gaussian(result, target, fix_x_var=False, beta=1.0,
     the VAE model. We can fix this variance by setting fix_x_var=True
     """
     # TODO: somehow when beta>1e-3, the model doesn't converge well.
-    def gaussian_loglik(x, x_hat, x_logstd):
-        _loglik = (-0.5 * torch.square((x_hat - x) / torch.exp(x_logstd)) - 
-                   x_logstd * math.log(math.sqrt(2 * math.pi)))
-        return torch.mean(torch.sum(_loglik, dim=-1))
-
-    def kl_divergence(z_mean, z_logstd, prior_mu=0.0, prior_sigma=1.0):
-        """
-        Analytical KL divergence for Gaussian:
-        https://en.wikipedia.org/wiki/Normal_distribution#Other_properties
-        """
-        mu1, var1 = z_mean, torch.square(torch.exp(z_logstd))
-        mu2, var2 = prior_mu, prior_sigma**2
-        _kl = (torch.square(mu1 - mu2) / (2 * var2) + 
-               0.5 * (var1 / var2 - 1 - 2 * z_logstd + math.log(var2)))
-        return torch.mean(torch.sum(_kl, dim=-1))
-
     x_hat, x_logstd, z, z_mean, z_logstd = result
     if fix_x_var:
         x_logstd = x_logstd * 0 #torch.zeros(1, 1)#.to(self.device)
 
     # Calculate loss
     loglik = gaussian_loglik(target, x_hat, x_logstd)
-    kl = kl_divergence(z_mean, z_logstd, prior_mu, prior_sigma)
+    kl = gaussian_kl(z_mean, z_logstd, prior_mu, prior_sigma)
     return -(loglik - beta * kl)
