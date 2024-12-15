@@ -7,7 +7,8 @@ from sklearn.metrics import roc_auc_score
 from sklearn.metrics import confusion_matrix
 
 class NNWrapper():
-    def __init__(self, model, criterion, optimizer, device='cpu'):
+    def __init__(self, model, criterion, optimizer, reconstruct=False, 
+                 device='cpu'):
         """
         Parameters
         ----------
@@ -17,6 +18,8 @@ class NNWrapper():
             E.g., torch.nn.CrossEntropyLoss()
         optimizer: optimizer in torch.optim
             E.g., torch.optim.SGD(model.parameters(), lr=0.003, momentum=0.8)
+        reconstruct: bool
+            If True, it will constructure the same format of input, e.g., (X, y)
         device: str
             To set the device for CPU or GPU, e.g., 'cuda:0'
         """
@@ -24,6 +27,7 @@ class NNWrapper():
         self.device = device
         self.criterion = criterion
         self.optimizer = optimizer
+        self.reconstruct = reconstruct
         
     def train(self, train_loader, verbose=False):
         self.model.train()
@@ -31,15 +35,18 @@ class NNWrapper():
         for sample in train_loader:
             if len(sample) == 1:
                 data = sample[0].to(torch.device(self.device))
-                label = data
-            else:
+                target = data
+            elif len(sample) == 2:
                 data, label = sample
                 data = data.to(torch.device(self.device))
                 label = label.to(torch.device(self.device))
+                target = (data, label) if self.reconstruct else label
+            else:
+                raise NotImplementedError
             
             self.optimizer.zero_grad()
             output = self.model(data)
-            loss = self.criterion(output, label)
+            loss = self.criterion(output, target)
             loss.backward()
             self.optimizer.step()
             train_loss += loss.item() * data.size(0)
@@ -55,17 +62,20 @@ class NNWrapper():
             for sample in test_loader:
                 if len(sample) == 1:
                     data = sample[0].to(torch.device(self.device))
-                    label = data
-                else:
+                    target = data
+                elif len(sample) == 2:
                     data, label = sample
                     data = data.to(torch.device(self.device))
                     label = label.to(torch.device(self.device))
+                    target = (data, label) if self.reconstruct else label
+                else:
+                    raise NotImplementedError
                 
                 output = self.model(data)
                 y_outputs.append(output)
                 
                 if compute_loss:
-                    loss = self.criterion(output, label)
+                    loss = self.criterion(output, target)
                     test_loss += loss.item() * data.size(0)
         
         y_outputs = torch.cat(y_outputs)     
