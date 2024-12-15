@@ -48,7 +48,7 @@ setup(
     # What does your project relate to?
     keywords=['Neural Network Models', 'Machine Learning'],
     
-    packages=find_packages(),
+    packages=find_packages(exclude=['examples']),
     install_requires=reqs,
 
     extras_require={
