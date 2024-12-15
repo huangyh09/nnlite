@@ -1,20 +1,22 @@
-# nnwrapper
-A light toolbox with some utilities and wrappers for Neural Network Models
+# nnlite
+A light toolbox with utilities and wrappers for Neural Network Models
 
 
 ## Install
 
 ```
-pip install -U nnwrapper
+# for published version
+pip install -U nnlite
 
-pip install -U git+https://github.com/huangyh09/nnwrapper
+# or developing version
+pip install -U git+https://github.com/huangyh09/nnlite
 ```
 
 ## Quick Usage
 
 ```python
+from nnlite import NNWrapper
 from functools import partial
-from nnwrapper import NNWrapper
 
 torch.manual_seed(0)
 dev = 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -27,6 +29,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=0.95)
 ## NNWrapper for model training
 my_wrapper = NNWrapper(model, criterion, optimizer, device=dev)
 my_wrapper.fit(train_loader, epoch=3000, validation_loader=None, verbose=False)
+my_wrapper.predict(test_loader)
 
 plt.plot(my_wrapper.train_losses)
 ```
@@ -34,8 +37,6 @@ plt.plot(my_wrapper.train_losses)
 
 ## Examples
 See the [examples](./examples) folder, including
-* CNN-1D: []
-* VAE for 3K PBMC: []
-* and more
-
-
+* CNN-1D: [CamoTSS-CNN-demo.ipynb](./examples/CamoTSS-CNN-demo.ipynb)
+* VAE for 3K PBMC: [PBMC3K_VAE.ipynb](./examples/PBMC3K_VAE.ipynb)
+* and more.
